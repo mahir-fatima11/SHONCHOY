@@ -1,42 +1,167 @@
-# $honchoy — Core Financial Engine
+# $honchoy
 
-A pink and white budgeting app with expense tracking, a debt overview, and an automatic budget planner.
+A pink-and-white money planner with one job: turn income, expenses and debt into a single clear
+monthly plan — what to pay, what to save, and what is safe to spend.
 
-## Where the logic lives
-**`src/engine.js` → `calculateFinancialPlan(data, options)`** is a pure function. It holds all the money math and has comments explaining each step.
-- The worker imports it for `POST /api/plan`.
-- The browser loads the same file from `GET /engine.js`, so there is one source of truth.
-- The tunable thresholds are in the `RULES` object at the top of the file.
+## Project Overview
 
-### Steps
-1. **Income**: adds up all sources and converts to a monthly amount (monthly / weekly / daily / yearly).
-2. **Expenses**: totals fixed and variable spending and groups it by category.
-3. **Debts**:
-   - Debt-to-income (DTI) flag at 30% (warning) and 40% (danger).
-   - High-interest flag based on the debt type (bank 18%, MFI 27%, informal 24%, credit purchase 24%). Any rate of 36% or more is danger.
-   - Payoff timeline worked out month by month, for both the minimum payment and a "what if" payment.
-   - Warns if a payment never covers the interest.
-4. **Disposable income** = income − expenses.
-   - **Debt carve-out** = the minimum payments, plus 10% of the surplus as an extra payment on the highest-rate debt when any debt is flagged.
-5. **Emergency fund**:
-   - Target = 3 × (expenses + minimum debt payments).
-   - If a goal with `type: "emergency"` exists, its `cost` is used as the target instead.
-6. **Split of what's left** (emergency / goals / flexible):
-   - 60/25/15 while the fund is under 50%.
-   - 45/35/20 once it is over 50%.
-   - 0/60/40 once it is fully funded.
-   - The emergency share is capped at the amount still needed. Any overflow goes to goals and flexible spending.
-   - The goals money is shared between goals according to how much each still needs.
+- **Name**: $honchoy
+- **Goal**: Give anyone with mixed debt (bank loans, microfinance, informal/family loans, shop
+  credit) a realistic monthly plan, and warn them early when the arithmetic stops working.
+- **Stack**: Hono + TypeScript on Cloudflare Pages, vanilla-DOM front end, no front-end framework.
 
-## Endpoints
-- `GET /`: the UI, with tabs for Plan, Income, Expenses, Debts and Goals.
-- `GET /engine.js`: the engine as an ES module.
-- `POST /api/plan?today=YYYY-MM-DD`: send the $honchoy data object, get the calculated plan back.
+### Currently completed features
 
-## Data
-- Uses the shared `$honchoy` data shape: `{ app, user, income, expenses, debts, goals, logs }`.
-- Debt types: `bank_loan | microloan | informal | credit_purchase`.
-- For now, data is saved in the browser's localStorage. D1 could replace this later.
+**1. Expense tracking**
+- Add, edit and delete expenses, each tagged `fixed` (committed every month) or `variable` (moves).
+- Every expense has a category and an amount; categories are grouped and ranked by size.
+- Computes the fixed/variable split, so you can see how much room you actually have to cut.
+- Warns when more than 70% of spending is fixed ("little room to adjust").
 
-## Dev
-`npm run build && pm2 start ecosystem.config.cjs` → http://localhost:3000
+**2. Debt overview**
+- Add one or more debts with type — `bank_loan`, `microloan` (MFI), `informal` (family) or
+  `credit_purchase` — plus amount owed, interest rate and minimum monthly payment.
+- **Debt-load flag**: debt payments as a share of income are checked against **30% (watch)** and
+  **40% (over-indebted)**. Both thresholds are editable.
+- **High-interest flag**: any debt at or above **25% a year** is flagged, **40%+** is flagged hard.
+- **Negative amortisation**: detects when a minimum payment does not even cover the month's
+  interest, so the balance grows forever.
+- Per-debt breakdown: monthly interest cost, how much of the minimum reaches principal, time to
+  clear, and total interest paid.
+- **Payoff timeline**: amortises each debt, then simulates clearing *all* of them with one monthly
+  pool — `avalanche` (highest rate first) or `snowball` (smallest balance first), with a side-by-side
+  comparison of which costs less interest. Reports the debt-free month.
+- Grouped totals per lending channel (bank vs MFI vs family vs credit).
+
+**3. Automatic budget planner** — one function, `computeFinancials()`
+- `disposable income = income − living expenses`
+- `debt carve-out  = minimum payments (+ any extra you choose)`
+- `remainder       = disposable − carve-out`
+- Splits the remainder between **emergency fund**, **goals** and **flexible spending**, weighted
+  toward the emergency fund until it is fully funded, then dropping to a maintenance top-up.
+- Emergency-fund target defaults to 3 months of living costs, or comes from a goal marked
+  `emergency_fund`. Projects the month it will be fully funded.
+- Goals are funded as a queue, so a later goal correctly waits for earlier ones.
+- Spending-pace check compares logged spending against the flexible allowance and projects the month.
+- Financial health score (0–100) with a band, plus ordered "what to do next" recommendations.
+
+## URLs
+
+- **Production**: _not yet deployed — see Deployment_
+- **Local sandbox**: `http://localhost:3000` (PM2 + `wrangler pages dev`)
+- **GitHub**: _not pushed yet_
+
+## Functional entry URIs
+
+| Method | Path | Params | Purpose |
+| --- | --- | --- | --- |
+| GET | `/` | — | The app shell; all views are client-rendered |
+| GET | `/api/health` | — | Liveness probe |
+| GET | `/api/meta` | — | Defaults, categories, debt types, sample snapshot |
+| POST | `/api/calculate` | body `{ data?, options?, now? }` | Runs the engine, returns the full analysis. Empty body uses the sample |
+| POST | `/api/validate` | body `{ data }` | Normalises a snapshot and reports what was dropped |
+| GET | `/static/*` | — | `app.js`, `style.css`, `favicon.svg` |
+
+Client routes: `#/dashboard`, `#/expenses`, `#/debts`, `#/budget`, `#/goals`, `#/log`, `#/data`.
+
+### `POST /api/calculate` example
+
+```bash
+curl -s -X POST http://localhost:3000/api/calculate \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Omit `data` to analyse the built-in sample. Pass your own snapshot in the shape below.
+
+## Data Architecture
+
+- **Storage**: browser `localStorage` under `honchoy.v1.data` / `honchoy.v1.options`. There is no
+  login and no server-side store — the plan never leaves the device (see *Known limitations*).
+- **Portability**: export/import JSON, plus a `?d=<json>` share link that loads a plan read-only.
+- **Data models**: `HonchoyData` (input) → `Analysis` (output), defined in `src/types.ts`.
+
+```json
+{
+  "app": "$honchoy",
+  "user": { "ageConfirmed": true, "language": "en", "currency": "USD" },
+  "income": { "type": "monthly", "sources": [{ "name": "salary", "amount": 20000 }] },
+  "expenses": [
+    { "category": "rent", "name": "House rent", "amount": 6000, "type": "fixed" },
+    { "category": "food", "name": "Groceries", "amount": 3000, "type": "variable" }
+  ],
+  "debts": [
+    { "type": "microloan", "amount": 5000, "interestRate": 20, "minMonthlyPayment": 500 }
+  ],
+  "goals": [
+    { "id": "g1", "name": "Sewing machine", "cost": 15000, "saved": 3000, "type": "custom" }
+  ],
+  "logs": [{ "date": "2026-09-25", "amount": 1000, "note": "" }]
+}
+```
+
+`income.type` may be `monthly`, `weekly`, `biweekly` or `annual`; every source is normalised to a
+monthly figure. `data.user.currency` (added for formatting) is optional — older snapshots still load.
+
+### Where the maths lives
+
+**All calculation logic is in one function: `computeFinancials()` in `src/engine.ts`.**
+
+It is pure — no clock reads (the date is injected via `now`), no I/O, no globals — so the identical
+code runs in the Worker *and* in the browser, and the two can never disagree. The dollar amounts the
+UI shows are produced by the same function that answers the API. Everything above it is small private
+helpers; everything below is display formatting.
+
+## User Guide
+
+1. Open the app — it starts with sample data so you can see how it works.
+2. **Expenses** — add your costs, tagging each fixed or variable.
+3. **Debts** — add each loan: type, amount owed, rate, minimum payment. Read the warnings and the
+   payoff timeline; use the slider to test what an extra payment per month would do.
+4. **Budget** — the plan is already built. Adjust the emergency-fund target and the 30/40 debt
+   thresholds to match your own situation.
+5. **Goals** — add what you are saving for; mark one as your emergency fund to drive the buffer.
+6. **Spending log** — add entries as you spend; the pace check tells you if the month is running hot.
+7. **Data** — download a JSON backup, or copy a share link.
+
+## Deployment
+
+- **Platform**: Cloudflare Pages (`wrangler pages deploy dist`)
+- **Status**: built and verified locally; **not yet deployed**
+- **Suggested project name**: `honchoy`
+- **Last updated**: 2026-09-25
+
+### Local development
+
+```bash
+npm run build          # bundle the client, then build the Worker
+npm test               # 112 engine assertions
+npm run test:render    # 66 render assertions against the built bundle
+npm run verify         # build + both suites
+pm2 start ecosystem.config.cjs   # http://localhost:3000
+```
+
+### Notes
+
+- `public/static/app.js` is **generated** by `scripts/build-client.mjs`; never edit it by hand.
+- Do not add a `src/*.js` file next to a `.ts` file of the same name — Vite resolves `.js` first and
+  will silently shadow the TypeScript module.
+- No bindings required: no D1, KV or R2, so the deploy needs no configuration.
+
+## Known limitations / not yet implemented
+
+- **Data is device-local.** There is no account system and no server-side store, so a plan does not
+  follow the user between devices. Adding sync means a Cloudflare D1 table plus some form of login.
+- **No authentication**, so no multi-user support.
+- `user.language` (`en` / `mn`) is stored but the UI is English-only; no translations exist yet.
+- Nothing is verified against real loan contracts — rates and balances are user-supplied estimates.
+- The engine uses flat monthly amortisation. It does not model variable rates, fees, penalties,
+  grace periods or irregular income.
+- No PDF/CSV export, reminders, recurring transactions, or category budgeting (envelopes).
+
+## Recommended next steps
+
+1. Deploy to Cloudflare Pages and record the production URL above.
+2. Add D1 + login so plans sync across devices.
+3. Add CSV/PDF export and recurring expense templates.
+4. Add i18n for `mn` (the data shape already carries a language field).
+5. Extend the engine to model fees and variable rates, with tests for each new rule.

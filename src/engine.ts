@@ -75,11 +75,14 @@ export const DEFAULT_OPTIONS: EngineOptions = {
 }
 
 /**
- * Split of the post-debt remainder once the emergency fund is saturated.
- * While the fund is short, `emergencyWeightFull` -> `emergencyWeightFunded`
- * slides linearly with how funded the buffer already is.
+ * Share of the remainder the emergency fund takes while it is still short.
+ * It slides from `EMERGENCY_WEIGHT_EMPTY` down to `EMERGENCY_WEIGHT_NEARLY` as
+ * the buffer fills — always the largest single share until it is funded, so the
+ * rule "weighted toward the emergency fund until fully funded" holds at every
+ * point on the curve. Once funded, `emergencyMaintenanceWeight` takes over.
  */
 const EMERGENCY_WEIGHT_EMPTY = 0.7
+const EMERGENCY_WEIGHT_NEARLY = 0.5
 const GOALS_SHARE_OF_REST = 0.65
 /** Flexible spending never drops below this share of the remainder. */
 const FLEXIBLE_FLOOR = 0.1
@@ -163,7 +166,6 @@ function amortize(
   startISO: string,
 ): PayoffEstimate {
   const r = monthlyRate(annualPercent)
-  const firstMonthInterest = round2(balance * r)
   const negativeAmortization = payment <= 0 || payment + EPS <= balance * r
 
   if (balance <= EPS) {
@@ -202,7 +204,6 @@ function amortize(
   }
 
   const cleared = bal <= EPS
-  void firstMonthInterest
   return {
     months: cleared ? months : null,
     payoffMonth: cleared ? addMonths(startISO, months) : null,
@@ -565,11 +566,12 @@ export function computeFinancials({ data, options, now }: ComputeArgs): Analysis
       const negativeAmortization = debt.minMonthlyPayment + EPS <= monthlyInterest
 
       const atMinimum = amortize(debt.amount, debt.interestRate, debt.minMonthlyPayment, startISO)
-      // The user's chosen payment = their minimum + whatever extra they pledged.
-      // The extra is only guaranteed on the first debt in the queue, so for the
-      // per-debt view we quote the minimum unless an extra is set explicitly.
-      const paymentUsed = round2(debt.minMonthlyPayment + pos(opts.extraDebtPayment))
-      const payoff = amortize(debt.amount, debt.interestRate, paymentUsed, startISO)
+      // The per-debt figure is deliberately quoted at the *minimum* payment: it
+      // answers "if I only ever pay the minimum on this loan, when does it end?".
+      // An extra payment is not spread evenly across debts — the simulation in
+      // `plan` aims the whole surplus at one debt at a time — so adding the extra
+      // to every debt here would overstate how fast each one actually clears.
+      const payoff = atMinimum
 
       // Severity ladder for a single debt's price.
       let severity: Severity | null = null
@@ -705,25 +707,42 @@ export function computeFinancials({ data, options, now }: ComputeArgs): Analysis
   const emergencyFullyFunded = emergencyGap <= EPS || emergencyTarget <= EPS
   const fundedRatio = round2(clamp(ratio(emergencySaved, emergencyTarget), 0, 1) * 100) / 100
 
-  // Weighting. `remaining` is everything left after the emergency fund's cut.
+  // Weighting. Slide from the "empty" share down to the "nearly funded" share as
+  // the buffer fills, then drop to a maintenance top-up once it is complete.
+  // Because EMERGENCY_WEIGHT_NEARLY (0.5) always exceeds the largest share the
+  // other two buckets can take (0.5 * 0.65 = 0.325), the emergency fund stays
+  // the biggest slice for the whole time it is short of its target.
   const emergencyWeight = emergencyFullyFunded
     ? opts.emergencyMaintenanceWeight
-    : round2(lerp(EMERGENCY_WEIGHT_EMPTY, opts.emergencyMaintenanceWeight, fundedRatio) * 100) / 100
+    : round2(
+        lerp(EMERGENCY_WEIGHT_EMPTY, EMERGENCY_WEIGHT_NEARLY, fundedRatio) * 100,
+      ) / 100
   const remainingWeight = round2(1 - emergencyWeight)
 
   // With goals still open, goals take most of what the buffer doesn't; with no
   // goals, the money becomes spending money.
   const openGoals = d.goals.filter((g) => g.type !== 'emergency_fund' && g.cost - g.saved > EPS)
-  let goalsWeight = openGoals.length > 0 ? round2(remainingWeight * GOALS_SHARE_OF_REST * 100) / 100 : 0
-  let flexibleWeight = round2((remainingWeight - goalsWeight) * 100) / 100
+  const goalsWeight =
+    openGoals.length > 0 ? round2(remainingWeight * GOALS_SHARE_OF_REST * 100) / 100 : 0
 
-  // Never starve flexible spending to zero — a plan with no room to live is not
-  // a plan anyone follows. Clamp it up and take the difference from goals.
-  if (remainder > 0 && flexibleWeight < FLEXIBLE_FLOOR && goalsWeight > 0) {
-    const moved = FLEXIBLE_FLOOR - flexibleWeight
-    flexibleWeight = FLEXIBLE_FLOOR
-    goalsWeight = Math.max(0, round2((goalsWeight - moved) * 100) / 100)
-    flexibleWeight = round2((1 - emergencyWeight - goalsWeight) * 100) / 100
+  // Flexible spending keeps at least FLEXIBLE_FLOOR of the remainder — a plan
+  // with no room to live is a plan nobody follows. The shortfall comes out of
+  // the goals bucket first; the emergency fund is only raided if there are no
+  // goals at all (i.e. the goals bucket is already empty).
+  const required = round2((1 - emergencyWeight - goalsWeight) * 100) / 100
+  let emergencyFinal = emergencyWeight
+  let goalsFinal = goalsWeight
+  let flexibleWeight = required
+  if (remainder > 0 && required < FLEXIBLE_FLOOR - 1e-9) {
+    const need = round2((FLEXIBLE_FLOOR - required) * 100) / 100
+    const fromGoals = Math.min(goalsFinal, need)
+    goalsFinal = round2((goalsFinal - fromGoals) * 100) / 100
+    flexibleWeight = round2((required + fromGoals) * 100) / 100
+    const stillShort = round2((need - fromGoals) * 100) / 100
+    if (stillShort > 0) {
+      emergencyFinal = round2((emergencyFinal - stillShort) * 100) / 100
+      flexibleWeight = round2((flexibleWeight + stillShort) * 100) / 100
+    }
   }
 
   const toAmount = (w: number) => round2(remainder * w)
@@ -731,18 +750,18 @@ export function computeFinancials({ data, options, now }: ComputeArgs): Analysis
   const allocations: BudgetAllocation[] = [
     {
       key: 'emergency',
-      amount: toAmount(emergencyWeight),
-      weight: emergencyWeight,
+      amount: toAmount(emergencyFinal),
+      weight: emergencyFinal,
       rationale: emergencyFullyFunded
         ? 'Buffer already funded — keeping up a small top-up only.'
         : `Buffer is ${Math.round(fundedRatio * 100)}% funded, so it takes the largest share.`,
     },
     {
       key: 'goals',
-      amount: toAmount(goalsWeight),
-      weight: goalsWeight,
+      amount: toAmount(goalsFinal),
+      weight: goalsFinal,
       rationale:
-        goalsWeight > 0
+        goalsFinal > 0
           ? `Saving toward ${openGoals.length} open goal${openGoals.length === 1 ? '' : 's'}.`
           : 'No open goals right now — nothing earmarked.',
     },
@@ -755,11 +774,11 @@ export function computeFinancials({ data, options, now }: ComputeArgs): Analysis
   ]
 
   const emergencyAllocation = allocations[0].amount
-  const monthsToFund =
-    emergencyFullyFunded || emergencyAllocation <= EPS
-      ? emergencyFullyFunded
-        ? 0
-        : null
+  // 0 months means "already funded"; null means "no money is flowing to it".
+  const monthsToFund = emergencyFullyFunded
+    ? 0
+    : emergencyAllocation <= EPS
+      ? null
       : Math.ceil(emergencyGap / emergencyAllocation)
 
   const budget: BudgetPlan = {
