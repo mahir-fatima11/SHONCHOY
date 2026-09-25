@@ -155,7 +155,7 @@ if (bootError) {
 
 /* ── Every route must render cleanly ───────────────────────────────────── */
 
-const ROUTES = ['dashboard', 'expenses', 'debts', 'budget', 'goals', 'log', 'data']
+const ROUTES = ['dashboard', 'insights', 'expenses', 'debts', 'budget', 'goals', 'log', 'learn', 'safety', 'data']
 const EXPECTED = {
   dashboard: ['Your month at a glance', 'Monthly income', 'Debt payoff order'],
   expenses: ['Fixed vs variable', 'All expenses', 'By category'],
@@ -164,6 +164,9 @@ const EXPECTED = {
   goals: ['Saving queue', 'Goals tracked'],
   log: ['Spending log', 'Entries', 'Pace'],
   data: ['Data &amp; settings', 'Your data shape'],
+  insights: ['How your money is doing', 'What we notice', 'Money in vs. money out', 'Savings &amp; goals'],
+  learn: ['Money basics, made simple', 'Pay yourself first', 'Don’t put all your eggs in one basket'],
+  safety: ['Is this offer safe?', 'Red flags to watch for', 'Guaranteed high returns', 'Golden rules'],
 }
 
 console.log('\nRoutes')
