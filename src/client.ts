@@ -22,6 +22,9 @@ import {
 } from './engine'
 import type { EngineOptions } from './engine'
 import { CATEGORIES, DEBT_TYPE_LABELS, SAMPLE_DATA } from './sample'
+import { lessonBody, scamResult, viewInsights, viewLearn, viewSafety } from './education/views'
+import { lessons } from './education/lessons'
+import { checkAnswers, checkText, redFlags } from './education/scams'
 import type {
   Analysis,
   Debt,
@@ -38,16 +41,20 @@ import type {
 
 const KEY_DATA = 'honchoy.v1.data'
 const KEY_OPTIONS = 'honchoy.v1.options'
+const KEY_LESSONS = 'honchoy.v1.lessonsRead'
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'MNT', 'INR', 'KES', 'NGN', 'PHP', 'VND', 'IDR', 'BRL', 'JPY']
 
 const ROUTES = [
   { id: 'dashboard', label: 'Dashboard', icon: '◉' },
+  { id: 'insights', label: 'Insights', icon: '♡' },
   { id: 'expenses', label: 'Expenses', icon: '▤' },
   { id: 'debts', label: 'Debts', icon: '⛓' },
   { id: 'budget', label: 'Budget', icon: '◫' },
   { id: 'goals', label: 'Goals', icon: '★' },
   { id: 'log', label: 'Spending log', icon: '✎' },
+  { id: 'learn', label: 'Learn', icon: '✦' },
+  { id: 'safety', label: 'Safety', icon: '⛨' },
   { id: 'data', label: 'Data', icon: '⇅' },
 ] as const
 
@@ -63,6 +70,39 @@ interface State {
 
 const state: Partial<State> = {}
 let storageOk = true
+
+/* Education module state (kept outside `data` so it never pollutes exports). */
+const edu = {
+  read: new Set<string>(),
+  scamMode: 'questions' as 'questions' | 'paste',
+  scamText: '',
+}
+
+function loadLessonsRead(): void {
+  try {
+    const raw = localStorage.getItem(KEY_LESSONS)
+    const ids = raw ? (JSON.parse(raw) as unknown) : []
+    if (Array.isArray(ids)) edu.read = new Set(ids.filter((x): x is string => typeof x === 'string'))
+  } catch {
+    edu.read = new Set()
+  }
+}
+
+function markLessonRead(id: string): void {
+  if (!lessons.some((l) => l.id === id)) return
+  edu.read.add(id)
+  try {
+    localStorage.setItem(KEY_LESSONS, JSON.stringify([...edu.read]))
+  } catch {
+    /* storage blocked — progress lasts for this tab only */
+  }
+}
+
+function openLesson(id: string): void {
+  const l = lessons.find((x) => x.id === id)
+  if (!l) return
+  openModal(l.title, lessonBody(l, money))
+}
 
 /* ═══════════════════════ 2. Tiny helpers ═══════════════════════════ */
 
@@ -1448,6 +1488,9 @@ function renderNav(): void {
         <span aria-hidden="true">${r.icon}</span>${esc(r.label)}
       </a>`,
   ).join('')
+  // With many tabs the nav scrolls sideways; keep the current tab visible.
+  const current = nav.querySelector<HTMLElement>('[aria-current="page"]')
+  current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
 }
 
 function renderCurrency(): void {
@@ -1473,6 +1516,9 @@ function render(): void {
     goals: viewGoals,
     log: viewLog,
     data: viewData,
+    insights: () => viewInsights(analysis(), money),
+    learn: () => viewLearn(edu.read, money),
+    safety: () => viewSafety(edu.scamMode, edu.scamText),
   }
   app.innerHTML = views[state.route]()
 }
@@ -1562,6 +1608,34 @@ document.addEventListener('submit', (event) => {
   }
 
   switch (form.id) {
+    case 'scam-questions-form': {
+      event.preventDefault()
+      const answered = redFlags.filter((f) => fd.get(f.id))
+      const box = $('#scam-result')
+      if (!box) return
+      if (answered.length === 0) {
+        box.innerHTML = `<p class="small muted" style="margin-top:var(--space-3)">Please answer at least one question first.</p>`
+        return
+      }
+      const yes = redFlags.filter((f) => fd.get(f.id) === 'yes').map((f) => f.id)
+      const unsure = redFlags.filter((f) => fd.get(f.id) === 'unsure').length
+      box.innerHTML = scamResult(checkAnswers(yes), unsure)
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      return
+    }
+
+    case 'scam-text-form': {
+      event.preventDefault()
+      edu.scamText = String(fd.get('text') ?? '').trim()
+      const box = $('#scam-result')
+      if (!box) return
+      box.innerHTML = edu.scamText
+        ? scamResult(checkText(edu.scamText))
+        : `<p class="small muted" style="margin-top:var(--space-3)">Paste a message first.</p>`
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      return
+    }
+
     case 'expense-form': {
       event.preventDefault()
       const payload: Expense = {
@@ -1687,6 +1761,30 @@ document.addEventListener('click', async (event) => {
   const data = state.data!
 
   switch (action) {
+    /* ── education ── */
+    case 'lesson-open':
+      event.preventDefault()
+      if (state.route !== 'learn') location.hash = '#/learn'
+      openLesson(id)
+      return
+    case 'lesson-done':
+      markLessonRead(id)
+      closeModal()
+      if (state.route === 'learn') render()
+      return
+    case 'lesson-next':
+      markLessonRead(id)
+      openLesson(target.dataset.next ?? '')
+      if (state.route === 'learn') render()
+      return
+    case 'scam-mode': {
+      const box = document.querySelector<HTMLTextAreaElement>('#scam-text-form textarea')
+      if (box) edu.scamText = box.value
+      edu.scamMode = id === 'paste' ? 'paste' : 'questions'
+      render()
+      return
+    }
+
     /* ── expenses ── */
     case 'expense-edit': {
       const item = findExpense(id)
@@ -2012,6 +2110,7 @@ function boot(): void {
   state.options = options
   state.route = routeFromHash()
   state.analysis = computeFinancials({ data, options })
+  loadLessonsRead()
 
   const banner = $('#storage-banner')
   if (banner) banner.hidden = storageOk
