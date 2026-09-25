@@ -45,6 +45,24 @@ monthly plan — what to pay, what to save, and what is safe to spend.
 - Spending-pace check compares logged spending against the flexible allowance and projects the month.
 - Financial health score (0–100) with a band, plus ordered "what to do next" recommendations.
 
+**4. Insights, learning & scam safety** — `src/education/`
+- **Insights** tab (`#/insights`): a plain-language overview for people with no finance
+  background. Shows money in vs. money out, what is left over, planned saving, the safety cushion
+  and every goal's progress, plus the engine's health score with a kind one-line reading and
+  "what would raise my score?" reasons. Writes **2–3 short personal insights** from the numbers
+  (for example "You are 20% of the way to your sewing machine…"), each linked to a lesson.
+  It never recalculates money itself; it reads only the `Analysis` from `computeFinancials()`.
+- **Learn** tab (`#/learn`): 8 two-minute lesson cards covering saving, emergency fund, interest,
+  debt, inflation, investing, diversification and budgeting. Each has a big idea, a worked
+  example in the user's own currency, and a "Try this" step. Read progress is stored under
+  `honchoy.v1.lessonsRead`.
+- **Safety** tab (`#/safety`): a scam checker with two modes. You can answer 7 yes / no /
+  not-sure questions, or paste a message to scan for red-flag phrases; either gives a low,
+  medium or high risk result with next steps. Also has an expandable list of red flags
+  (guaranteed returns, pressure to decide fast, upfront fees, unregistered agents,
+  recruiting, PIN/OTP requests, vague business) and golden rules. Everything runs on the
+  device; pasted text is never saved or sent.
+
 ## URLs
 
 - **Production**: _not yet deployed — see Deployment_
@@ -62,7 +80,7 @@ monthly plan — what to pay, what to save, and what is safe to spend.
 | POST | `/api/validate` | body `{ data }` | Normalises a snapshot and reports what was dropped |
 | GET | `/static/*` | — | `app.js`, `style.css`, `favicon.svg` |
 
-Client routes: `#/dashboard`, `#/expenses`, `#/debts`, `#/budget`, `#/goals`, `#/log`, `#/data`.
+Client routes: `#/dashboard`, `#/insights`, `#/expenses`, `#/debts`, `#/budget`, `#/goals`, `#/log`, `#/learn`, `#/safety`, `#/data`.
 
 ### `POST /api/calculate` example
 
@@ -121,7 +139,10 @@ helpers; everything below is display formatting.
    thresholds to match your own situation.
 5. **Goals** — add what you are saving for; mark one as your emergency fund to drive the buffer.
 6. **Spending log** — add entries as you spend; the pace check tells you if the month is running hot.
-7. **Data** — download a JSON backup, or copy a share link.
+7. **Insights** — read the plain-words summary; tap "Learn how" on any insight.
+8. **Learn** — read the short lessons; tap "Got it" to mark one as read.
+9. **Safety** — before paying for any offer, answer the questions or paste the message.
+10. **Data** — download a JSON backup, or copy a share link.
 
 ## Deployment
 
@@ -135,8 +156,9 @@ helpers; everything below is display formatting.
 ```bash
 npm run build          # bundle the client, then build the Worker
 npm test               # 112 engine assertions
-npm run test:render    # 66 render assertions against the built bundle
-npm run verify         # build + both suites
+npm run test:education # 36 insight / lesson / scam-checker assertions
+npm run test:render    # 92 render assertions against the built bundle (all 10 tabs)
+npm run verify         # build + all three suites
 pm2 start ecosystem.config.cjs   # http://localhost:3000
 ```
 

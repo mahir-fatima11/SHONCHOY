@@ -1282,7 +1282,7 @@ table.data tfoot td {
 /* Ten tabs: tighten the pills a little on wide screens so they all fit. */
 @media (min-width: 721px) {
   .nav { gap: 2px; }
-  .nav a { padding: 7px 10px; font-size: 0.86rem; gap: 5px; }
+  .nav a { padding: 7px 8px; font-size: 0.86rem; gap: 4px; }
 }
 
 .edu-goal {
