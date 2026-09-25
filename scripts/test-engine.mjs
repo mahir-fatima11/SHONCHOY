@@ -51,6 +51,28 @@ section('Income')
   check('annual 120000 -> 10000/month', near(annual.income.monthly, 10000), String(annual.income.monthly))
 }
 
+/* ── 1b. Onboarding flow output compatibility ─────────────────────────── */
+section('Onboarding output')
+{
+  // Exact shape produced by public/static/onboarding (toExport()[0]).
+  const onboarding = {
+    app: '$honchoy',
+    user: { ageConfirmed: true, language: 'bn' },
+    income: { type: 'yearly', sources: [{ name: 'salary', amount: 240000 }] },
+    expenses: [], debts: [], goals: [], logs: [],
+  }
+  const clean = normalizeData(onboarding)
+  check('bn language is preserved', clean.user.language === 'bn', clean.user.language)
+  check('yearly income type is preserved', clean.income.type === 'yearly', clean.income.type)
+  const yearly = computeFinancials({ data: onboarding, now: '2026-09-25T00:00:00Z' })
+  check('yearly 240000 -> 20000 monthly', near(yearly.income.monthly, 20000), String(yearly.income.monthly))
+  const irregular = computeFinancials({
+    data: { ...onboarding, income: { type: 'irregular', sources: [{ name: 'freelancing', amount: 8000 }] } },
+    now: '2026-09-25T00:00:00Z',
+  })
+  check('irregular counts as a typical month', near(irregular.income.monthly, 8000), String(irregular.income.monthly))
+}
+
 /* ── 2. Expense split ──────────────────────────────────────────────────── */
 section('Expenses')
 {
