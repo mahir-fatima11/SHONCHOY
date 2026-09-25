@@ -45,6 +45,72 @@ monthly plan — what to pay, what to save, and what is safe to spend.
 - Spending-pace check compares logged spending against the flexible allowance and projects the month.
 - Financial health score (0–100) with a band, plus ordered "what to do next" recommendations.
 
+## Onboarding flow (`/onboarding`)
+
+The first-run flow: **18+ confirmation → income setup → summary/JSON output**, with an **EN / বাং (Bangla)** toggle.
+It is plain ES-module JavaScript with no build step, in `public/static/onboarding/`, served at `/onboarding`.
+
+```
+public/static/onboarding/
+  style.css                          tokens (blush/rose/plum) and component classes
+  js/app.js                          shell: header, progress, Back/Continue, hash routing
+  js/store.js                        state + toExport() (the data contract), saved in localStorage
+  js/i18n.js                         en/bn strings, t(), registerStrings(), Bangla-digit parsing
+  js/components/language-toggle.js   EN / বাং toggle → user.language
+  js/screens/                        age-screen, income-screen, summary-screen, index.js (screen order)
+```
+
+- **Age:** only the boolean `user.ageConfirmed` is stored. No date of birth or exact age is ever collected.
+- **Income type:** the flow offers `monthly` | `yearly` | `irregular`. The engine accepts all three: `yearly` is treated as ÷12, and `irregular` is a typical month.
+- **Language:** `user.language` is `en` | `bn`. `bn` is accepted by `normalizeData` and offered in the dashboard's language picker.
+
+### Data output (contract)
+`toExport(store.get())` returns exactly:
+```json
+[{
+  "app": "$honchoy",
+  "user":   { "ageConfirmed": true, "language": "en" },
+  "income": { "type": "monthly", "sources": [{ "name": "salary", "amount": 20000 }] },
+  "expenses": [{ "category": "rent", "name": "House rent", "amount": 6000, "type": "fixed" }],
+  "debts":    [{ "type": "microloan", "amount": 5000, "interestRate": 20, "minMonthlyPayment": 500 }],
+  "goals":    [{ "id": "g1", "name": "Sewing machine", "cost": 15000, "saved": 3000, "type": "custom" }],
+  "logs":     [{ "date": "2026-09-25", "amount": 1000, "note": "" }]
+}]
+```
+- `user.ageConfirmed` — boolean only. No date of birth or exact age is ever collected.
+- `user.language` — `"en"` | `"bn"`.
+- `income.type` — `"monthly"` | `"yearly"` | `"irregular"`.
+- `income.sources[].name` — what the user typed; if blank, the category key (`salary`, `freelancing`, `business`, `scholarship`, `other`).
+- `income.sources[].amount` — a number (Bangla digits like `২০,০০০` are parsed to `20000`). Rows with no valid amount are left out.
+- `expenses`, `debts`, `goals`, `logs` start as `[]`; teammates' screens fill them.
+
+State is saved in `localStorage` (`honchoy:onboarding:v1`), so a reload keeps progress.
+Debug in DevTools with `honchoy.store.get()`.
+
+### Adding an onboarding screen
+1. Create `public/static/onboarding/js/screens/expenses-screen.js`:
+```js
+import { registerStrings } from '../i18n.js';
+registerStrings({ en: { 'expenses.title': 'Your expenses' }, bn: { 'expenses.title': 'আপনার খরচ' } });
+
+export default {
+  id: 'expenses',                     // URL hash: #expenses
+  titleKey: 'expenses.title',
+  hintKey: 'expenses.required',       // optional: shown while Continue is disabled
+  isComplete: (state) => state.expenses.length > 0,
+  render: ({ state, t, lang }) => `<section class="screen"><h1 class="screen__title">${t('expenses.title', lang)}</h1>…</section>`,
+  mount(root, { store }) {
+    const onClick = () => store.update((s) => { s.expenses.push({ category: 'rent', name: 'House rent', amount: 6000, type: 'fixed' }); }, { rerender: true });
+    root.addEventListener('click', onClick);
+    return () => root.removeEventListener('click', onClick);  // cleanup
+  },
+};
+```
+2. Import it in `public/static/onboarding/js/screens/index.js` and put it before `summaryScreen`.
+
+Rules: write to the store only with `store.update()`. Pass `{ rerender: true }` for structural changes, but not on every keystroke (so inputs keep focus). Escape user text with `escapeHtml()`. Reuse the CSS classes `.field`, `.choice`, `.btn`, `.group` and the tokens `var(--rose-500)`, `var(--plum-900)`.
+
+
 ## URLs
 
 - **Production**: _not yet deployed — see Deployment_
@@ -56,6 +122,7 @@ monthly plan — what to pay, what to save, and what is safe to spend.
 | Method | Path | Params | Purpose |
 | --- | --- | --- | --- |
 | GET | `/` | — | The app shell; all views are client-rendered |
+| GET | `/onboarding` | — | Onboarding flow: 18+ → income → summary (`#age`, `#income`, `#summary`) |
 | GET | `/api/health` | — | Liveness probe |
 | GET | `/api/meta` | — | Defaults, categories, debt types, sample snapshot |
 | POST | `/api/calculate` | body `{ data?, options?, now? }` | Runs the engine, returns the full analysis. Empty body uses the sample |

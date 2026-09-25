@@ -163,6 +163,34 @@ app.post('/api/validate', async (c) => {
   })
 })
 
+/**
+ * Onboarding flow (18+ confirmation → income setup → summary).
+ * Standalone vanilla-JS module in `public/static/onboarding/` — see its README
+ * section. Served as its own page so it does not interfere with the dashboard shell.
+ */
+app.get('/onboarding', (c) =>
+  c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e24d82">
+  <title>$honchoy — Get started</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="/static/onboarding/style.css" rel="stylesheet">
+</head>
+<body>
+  <div id="app" class="app"></div>
+  <noscript>$honchoy needs JavaScript to run.</noscript>
+  <script type="module" src="/static/onboarding/js/app.js"></script>
+</body>
+</html>`),
+)
+
 app.get('/', (c) => c.render(<Shell />))
 
 app.notFound((c) => {

@@ -1105,7 +1105,14 @@ function viewBudget(): string {
 }
 
 function incomeTypeLabel(type: IncomeType): string {
-  return { monthly: 'monthly', weekly: 'weekly', biweekly: 'every 2 weeks', annual: 'yearly' }[type]
+  return {
+    monthly: 'monthly',
+    weekly: 'weekly',
+    biweekly: 'every 2 weeks',
+    annual: 'yearly',
+    yearly: 'yearly',
+    irregular: 'irregular (typical month)',
+  }[type]
 }
 
 function allocationCard(
@@ -1368,6 +1375,7 @@ function viewData(): string {
         <label for="data-language">Language</label>
         <select class="select" id="data-language" data-option="language">
           <option value="en"${state.data!.user.language === 'en' ? ' selected' : ''}>English</option>
+          <option value="bn"${state.data!.user.language === 'bn' ? ' selected' : ''}>বাংলা</option>
           <option value="mn"${state.data!.user.language === 'mn' ? ' selected' : ''}>Монгол</option>
         </select>
         <span class="hint">Stored with your data for future use.</span>

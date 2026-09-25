@@ -340,6 +340,8 @@ const INCOME_MULTIPLIER: Record<IncomeType, number> = {
   weekly: 52 / 12,
   biweekly: 26 / 12,
   annual: 1 / 12,
+  yearly: 1 / 12, // alias used by the onboarding flow
+  irregular: 1, // onboarding asks for a typical monthly amount
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ *
@@ -431,7 +433,7 @@ export function normalizeData(input: unknown): HonchoyData {
     app: '$honchoy',
     user: {
       ageConfirmed: raw.user?.ageConfirmed !== false,
-      language: raw.user?.language === 'mn' ? 'mn' : 'en',
+      language: ['bn', 'mn'].includes(String(raw.user?.language)) ? String(raw.user!.language) : 'en',
       currency: String(raw.user?.currency ?? 'USD').slice(0, 8),
     },
     income: { type: incomeType, sources },

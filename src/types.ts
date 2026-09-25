@@ -11,7 +11,11 @@
  * ------------------------------------------------------------------ */
 
 /** How the `income.sources` amounts are expressed. */
-export type IncomeType = 'monthly' | 'weekly' | 'biweekly' | 'annual'
+/**
+ * `yearly` is an alias of `annual`; `irregular` amounts are entered as a typical
+ * month (the onboarding flow asks "typical amount per month"), so they count as monthly.
+ */
+export type IncomeType = 'monthly' | 'weekly' | 'biweekly' | 'annual' | 'yearly' | 'irregular'
 
 /** Fixed = committed every month (rent). Variable = it moves (groceries, transport). */
 export type ExpenseType = 'fixed' | 'variable'
@@ -75,7 +79,7 @@ export interface HonchoyData {
   app: '$honchoy'
   user: {
     ageConfirmed: boolean
-    /** BCP-47-ish language tag, `en` or `mn`. */
+    /** BCP-47-ish language tag: `en` (English) or `bn` (Bangla). `mn` is still accepted for older snapshots. */
     language: string
     /** ISO-4217 code used for formatting. Optional so older snapshots still load. */
     currency?: string
